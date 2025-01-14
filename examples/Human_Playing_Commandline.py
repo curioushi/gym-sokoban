@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import gym_sokoban
 import time
 from PIL import Image
@@ -12,13 +12,13 @@ parser.add_argument('--rounds', '-r', metavar='rounds', type=int,
 parser.add_argument('--steps', '-s', metavar='steps', type=int,
                     help='maximum number of steps to be played each round (default: 300)', default=300)
 parser.add_argument('--env', '-e', metavar='env',
-                    help='Environment to load (default: Sokoban-v0)', default='Sokoban-v0')
+                    help='Environment to load (default: Sokoban-small-v1)', default='Sokoban-small-v1')
 parser.add_argument('--save', action='store_true',
                     help='Save images of single steps')
 parser.add_argument('--gifs', action='store_true',
                     help='Generate Gif files from images')
 parser.add_argument('--render_mode', '-m', metavar='render_mode',
-                    help='Render Mode (default: human)', default='human')
+                    help='Render Mode (default: rgb_array)', default='rgb_array')
 
 args = parser.parse_args()
 env_name = args.env
@@ -62,10 +62,10 @@ def print_available_actions():
 
 for i_episode in range(n_rounds):
     print('Starting new game!')
-    observation = env.reset()
+    observation, info = env.reset(options={"render_mode": render_mode})
 
     for t in range(n_steps):
-        env.render(render_mode, scale=scale_image)
+        env.render()
 
         action = input('Select action: ')
         try:
@@ -78,16 +78,16 @@ for i_episode in range(n_rounds):
             print_available_actions()
             continue
 
-        observation, reward, done, info = env.step(action, observation_mode=observation_mode)
-        print(ACTION_LOOKUP[action], reward, done, info)
+        observation, reward, terminated, truncated, info = env.step(action)
+        print(ACTION_LOOKUP[action], reward, terminated, truncated, info)
         print(len(observation), len(observation[0]), len(observation[0][0]))
         if save_images:
             img = Image.fromarray(np.array(env.render(render_mode, scale=scale_image)), 'RGB')
             img.save(os.path.join('images', 'observation_{}_{}.png'.format(i_episode, t)))
 
-        if done:
+        if terminated or truncated:
             print("Episode finished after {} timesteps".format(t+1))
-            env.render(render_mode, scale=scale_image)
+            env.render()
             break
 
     if generate_gifs:

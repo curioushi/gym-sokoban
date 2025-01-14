@@ -6,21 +6,34 @@ from .room_utils import generate_room
 from .render_utils import room_to_rgb, room_to_tiny_world_rgb
 import cv2
 import numpy as np
+import threading
+import time
 
 
 class SimpleImageViewer:
     def __init__(self):
-        pass
+        self.img = None
+        self.should_run = True
+        self.render_thread = threading.Thread(target=self._render_loop, daemon=True)
+        self.render_thread.start()
+    
+    def _render_loop(self):
+        while self.should_run:
+            if self.img is not None:
+                cv2.imshow("Sokoban", self.img)
+                cv2.waitKey(1)
+            time.sleep(0.03)
+        cv2.destroyAllWindows()
 
     def imshow(self, img):
-        cv2.imshow("Sokoban", img)
-        cv2.waitKey(1)
+        self.img = img
     
     def isopen(self):
-        return cv2.getWindowProperty("Sokoban", cv2.WND_PROP_VISIBLE) > 0
+        return True
 
     def close(self):
-        cv2.destroyWindow("Sokoban")
+        self.should_run = False
+        self.render_thread.join()
 
 
 class SokobanEnv(gym.Env):
