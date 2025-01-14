@@ -1,10 +1,26 @@
-import gym
-from gym.utils import seeding
-from gym.spaces.discrete import Discrete
-from gym.spaces import Box
+import gymnasium as gym
+from gymnasium.utils import seeding
+from gymnasium.spaces.discrete import Discrete
+from gymnasium.spaces import Box
 from .room_utils import generate_room
 from .render_utils import room_to_rgb, room_to_tiny_world_rgb
+import cv2
 import numpy as np
+
+
+class SimpleImageViewer:
+    def __init__(self):
+        pass
+
+    def imshow(self, img):
+        cv2.imshow("Sokoban", img)
+        cv2.waitKey(1)
+    
+    def isopen(self):
+        return cv2.getWindowProperty("Sokoban", cv2.WND_PROP_VISIBLE) > 0
+
+    def close(self):
+        cv2.destroyWindow("Sokoban")
 
 
 class SokobanEnv(gym.Env):
@@ -48,10 +64,6 @@ class SokobanEnv(gym.Env):
             # Initialize Room
             _ = self.reset()
 
-    def seed(self, seed=None):
-        self.np_random, seed = seeding.np_random(seed)
-        return [seed]
-
     def step(self, action, observation_mode='rgb_array'):
         assert action in ACTION_LOOKUP
         assert observation_mode in ['rgb_array', 'tiny_rgb_array', 'raw']
@@ -75,8 +87,6 @@ class SokobanEnv(gym.Env):
 
         self._calc_reward()
         
-        done = self._check_if_done()
-
         # Convert the observation to RGB frame
         observation = self.render(mode=observation_mode)
 
@@ -85,11 +95,11 @@ class SokobanEnv(gym.Env):
             "action.moved_player": moved_player,
             "action.moved_box": moved_box,
         }
-        if done:
-            info["maxsteps_used"] = self._check_if_maxsteps()
-            info["all_boxes_on_target"] = self._check_if_all_boxes_on_target()
 
-        return observation, self.reward_last, done, info
+        terminated = self._check_if_all_boxes_on_target()
+        truncated = self._check_if_maxsteps()
+
+        return observation, self.reward_last, terminated, truncated, info
 
     def _push(self, action):
         """
@@ -199,26 +209,35 @@ class SokobanEnv(gym.Env):
     def _check_if_maxsteps(self):
         return (self.max_steps == self.num_env_steps)
 
-    def reset(self, second_player=False, render_mode='rgb_array'):
+    def reset(self, seed=None, options=None):
+        self.np_random, seed = seeding.np_random(seed)
+        default_options = {
+            "second_player": False,
+            "render_mode": 'rgb_array'
+        }
+        if options is None:
+            options = default_options
+        else:
+            options = default_options | options
         try:
             self.room_fixed, self.room_state, self.box_mapping = generate_room(
                 dim=self.dim_room,
                 num_steps=self.num_gen_steps,
                 num_boxes=self.num_boxes,
-                second_player=second_player
+                second_player=options["second_player"]
             )
         except (RuntimeError, RuntimeWarning) as e:
             print("[SOKOBAN] Runtime Error/Warning: {}".format(e))
             print("[SOKOBAN] Retry . . .")
-            return self.reset(second_player=second_player, render_mode=render_mode)
+            return self.reset(options=options)
 
         self.player_position = np.argwhere(self.room_state == 5)[0]
         self.num_env_steps = 0
         self.reward_last = 0
         self.boxes_on_target = 0
 
-        starting_observation = self.render(render_mode)
-        return starting_observation
+        starting_observation = self.render(options["render_mode"])
+        return starting_observation, dict()
 
     def render(self, mode='human', close=None, scale=1):
         assert mode in RENDERING_MODES
@@ -229,11 +248,10 @@ class SokobanEnv(gym.Env):
             return img
 
         elif 'human' in mode:
-            from gym.envs.classic_control import rendering
             if self.viewer is None:
-                self.viewer = rendering.SimpleImageViewer()
+                self.viewer = SimpleImageViewer()
             self.viewer.imshow(img)
-            return self.viewer.isopen
+            return self.viewer.isopen()
 
         elif 'raw' in mode:
             arr_walls = (self.room_fixed == 0).view(np.int8)
