@@ -231,7 +231,7 @@ class SokobanEnv(gym.Env):
         if options is None:
             options = default_options
         else:
-            options = default_options | options
+            options = {**default_options, **options}
         try:
             self.room_fixed, self.room_state, self.box_mapping = generate_room(
                 dim=self.dim_room,

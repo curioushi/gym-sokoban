@@ -16,7 +16,7 @@ setup(
       long_description=long_description,
       long_description_content_type="text/markdown",
        url="https://github.com/mpSchrader/gym-sokoban",
-      install_requires=['gymnasium>=1.0.0', 'numpy>=1.14.1', 'tqdm>=4.32.1', 'imageio>=2.3.0', 'requests>=2.22.0', 'opencv-python>=4.0.0'],
+      install_requires=['gymnasium>=0.28.0', 'numpy>=1.14.1', 'tqdm', 'imageio>=2.3.0', 'requests>=2.22.0', 'opencv-python>=4.0.0'],
       packages=find_packages(),
       package_data={
       'gym_sokoban': ['envs/*', 'envs/surface/*', 'envs/surface/*/*'],
