@@ -15,7 +15,7 @@ The room generation is random and therefore, will allow to train Deep Neural Net
 
 ```bash
 # create a new environment
-conda create -n gym-sokoban python=3.8
+conda create -n gym-sokoban python=3.9
 
 # install cleanrl core requirements
 pip install -r cleanrl/requirements/requirements.txt

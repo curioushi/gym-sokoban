@@ -47,7 +47,8 @@ class SokobanEnv(gym.Env):
                  max_steps=120,
                  num_boxes=4,
                  num_gen_steps=None,
-                 reset=True):
+                 reset=True,
+                 observation_mode='tiny_rgb_array'):
 
         # General Configuration
         self.dim_room = dim_room
@@ -70,16 +71,21 @@ class SokobanEnv(gym.Env):
         self.viewer = None
         self.max_steps = max_steps
         self.action_space = Discrete(len(ACTION_LOOKUP))
-        screen_height, screen_width = (dim_room[0] * 16, dim_room[1] * 16)
+        self.observation_mode = observation_mode
+        if self.observation_mode == 'rgb_array':
+            screen_height, screen_width = (dim_room[0] * 16, dim_room[1] * 16)
+        elif self.observation_mode == 'tiny_rgb_array':
+            screen_height, screen_width = (dim_room[0], dim_room[1])
+        self.render_mode = 'rgb_array'
         self.observation_space = Box(low=0, high=255, shape=(screen_height, screen_width, 3), dtype=np.uint8)
         
         if reset:
             # Initialize Room
             _ = self.reset()
 
-    def step(self, action, observation_mode='rgb_array'):
+    def step(self, action):
         assert action in ACTION_LOOKUP
-        assert observation_mode in ['rgb_array', 'tiny_rgb_array', 'raw']
+        assert self.observation_mode in ['rgb_array', 'tiny_rgb_array', 'raw']
 
         self.num_env_steps += 1
 
@@ -101,7 +107,7 @@ class SokobanEnv(gym.Env):
         self._calc_reward()
         
         # Convert the observation to RGB frame
-        observation = self.render(mode=observation_mode)
+        observation = self.render(mode=self.observation_mode)
 
         info = {
             "action.name": ACTION_LOOKUP[action],
@@ -249,7 +255,7 @@ class SokobanEnv(gym.Env):
         self.reward_last = 0
         self.boxes_on_target = 0
 
-        starting_observation = self.render(options["render_mode"])
+        starting_observation = self.render(self.observation_mode)
         return starting_observation, dict()
 
     def render(self, mode='human', close=None, scale=1):
@@ -261,10 +267,12 @@ class SokobanEnv(gym.Env):
             return img
 
         elif 'human' in mode:
-            if self.viewer is None:
-                self.viewer = SimpleImageViewer()
-            self.viewer.imshow(img)
-            return self.viewer.isopen()
+            # import pdb; pdb.set_trace()
+            # if self.viewer is None:
+            #     self.viewer = SimpleImageViewer()
+            # self.viewer.imshow(img)
+            # return self.viewer.isopen()
+            return img
 
         elif 'raw' in mode:
             arr_walls = (self.room_fixed == 0).view(np.int8)

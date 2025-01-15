@@ -7,3 +7,5 @@
 .sokoban_cache/
 dist/
 build/
+runs/
+videos/

@@ -1,10 +1,14 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/dqn/#dqnpy
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import random
 import time
 from dataclasses import dataclass
 
 import gymnasium as gym
+import gym_sokoban
 import numpy as np
 import torch
 import torch.nn as nn
@@ -33,7 +37,7 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    save_model: bool = False
+    save_model: bool = True
     """whether to save model into the `runs/{run_name}` folder"""
     upload_model: bool = False
     """whether to upload the saved model to huggingface"""
@@ -43,7 +47,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "CartPole-v1"
     """the id of the environment"""
-    total_timesteps: int = 500000
+    total_timesteps: int = 50000000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -74,11 +78,14 @@ class Args:
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
         if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
+            env = gym.make(env_id)
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        if isinstance(env.observation_space, gym.spaces.Box):
+            env = gym.wrappers.TransformObservation(env, lambda obs: obs.astype(np.float32) / 255.0)
+            env.observation_space = gym.spaces.Box(low=0, high=1, shape=env.observation_space.shape, dtype=np.float32)
         env.action_space.seed(seed)
 
         return env
@@ -99,6 +106,8 @@ class QNetwork(nn.Module):
         )
 
     def forward(self, x):
+        batch_size = x.shape[0]
+        x = x.view(batch_size, -1)
         return self.network(x)
 
 

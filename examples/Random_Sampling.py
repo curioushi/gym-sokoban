@@ -13,7 +13,7 @@ ACTION_LOOKUP = env.unwrapped.get_action_lookup()
 print("Created environment: {}".format(env_name))
 
 for i_episode in range(1):#20
-    observation, info = env.reset(options={"render_mode": "rgb_array"})
+    observation, info = env.reset()
 
     for t in range(100):#100
         env.render()
