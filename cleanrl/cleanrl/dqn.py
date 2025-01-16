@@ -41,6 +41,8 @@ class Args:
     """whether to save model into the `runs/{run_name}` folder"""
     upload_model: bool = False
     """whether to upload the saved model to huggingface"""
+    save_model_frequency: int = 100000
+    """the frequency of saving the model"""
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
 
@@ -97,18 +99,30 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 class QNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(np.array(env.single_observation_space.shape).prod(), 120),
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.relu = nn.ReLU()
+        self.flatten = nn.Flatten()
+        
+        # Calculate the size of feature map after convolution
+        conv_out_size = 32 * 7 * 7  # Feature map size remains unchanged due to padding
+        
+        self.fc = nn.Sequential(
+            nn.Linear(conv_out_size, 120),
             nn.ReLU(),
             nn.Linear(120, 84),
             nn.ReLU(),
-            nn.Linear(84, env.single_action_space.n),
+            nn.Linear(84, env.single_action_space.n)
         )
 
     def forward(self, x):
-        batch_size = x.shape[0]
-        x = x.view(batch_size, -1)
-        return self.network(x)
+        # x shape: (B, 7, 7, 3) -> (B, 3, 7, 7)
+        x = x.permute(0, 3, 1, 2)
+        
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.flatten(x)
+        return self.fc(x)
 
 
 def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
@@ -180,7 +194,7 @@ poetry run pip install "stable_baselines3==2.0.0a1"
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
-        if random.random() < epsilon:
+        if random.random() < 0.5:
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
         else:
             q_values = q_network(torch.Tensor(obs).to(device))
@@ -235,31 +249,31 @@ poetry run pip install "stable_baselines3==2.0.0a1"
                         args.tau * q_network_param.data + (1.0 - args.tau) * target_network_param.data
                     )
 
-    if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
-        torch.save(q_network.state_dict(), model_path)
-        print(f"model saved to {model_path}")
-        from cleanrl_utils.evals.dqn_eval import evaluate
+        if args.save_model and global_step % args.save_model_frequency == 0:
+            model_path = f"runs/{run_name}/{args.exp_name}-{global_step}.cleanrl_model"
+            torch.save(q_network.state_dict(), model_path)
+            print(f"model saved to {model_path}")
+            from cleanrl_utils.evals.dqn_eval import evaluate
 
-        episodic_returns = evaluate(
-            model_path,
-            make_env,
-            args.env_id,
-            eval_episodes=10,
-            run_name=f"{run_name}-eval",
-            Model=QNetwork,
-            device=device,
-            epsilon=0.05,
-        )
-        for idx, episodic_return in enumerate(episodic_returns):
-            writer.add_scalar("eval/episodic_return", episodic_return, idx)
+            episodic_returns = evaluate(
+                model_path,
+                make_env,
+                args.env_id,
+                eval_episodes=10,
+                run_name=f"{run_name}-eval",
+                Model=QNetwork,
+                device=device,
+                epsilon=0.0,
+            )
+            average_return = np.mean(episodic_returns)
+            writer.add_scalar("eval/average_return", average_return, global_step)
 
-        if args.upload_model:
-            from cleanrl_utils.huggingface import push_to_hub
+            if args.upload_model:
+                from cleanrl_utils.huggingface import push_to_hub
 
-            repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
-            repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-            push_to_hub(args, episodic_returns, repo_id, "DQN", f"runs/{run_name}", f"videos/{run_name}-eval")
+                repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
+                repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
+                push_to_hub(args, episodic_returns, repo_id, "DQN", f"runs/{run_name}", f"videos/{run_name}-eval")
 
     envs.close()
     writer.close()
