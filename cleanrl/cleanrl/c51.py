@@ -1,10 +1,12 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/c51/#c51py
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import random
 import time
 from dataclasses import dataclass
-
 import gymnasium as gym
+import gym_sokoban
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,6 +14,7 @@ import torch.optim as optim
 import tyro
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
+from models.convlstm import ConvLSTM
 
 
 @dataclass
@@ -32,8 +35,10 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    save_model: bool = False
+    save_model: bool = True
     """whether to save model into the `runs/{run_name}` folder"""
+    save_model_frequency: int = 100000
+    """the frequency of saving model"""
     upload_model: bool = False
     """whether to upload the saved model to huggingface"""
     hf_entity: str = ""
@@ -42,9 +47,9 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "CartPole-v1"
     """the id of the environment"""
-    total_timesteps: int = 500000
+    total_timesteps: int = 10000000
     """total timesteps of the experiments"""
-    learning_rate: float = 2.5e-4
+    learning_rate: float = 1.0e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
@@ -54,7 +59,7 @@ class Args:
     """the return lower bound"""
     v_max: float = 100
     """the return upper bound"""
-    buffer_size: int = 10000
+    buffer_size: int = 50000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -66,7 +71,7 @@ class Args:
     """the starting epsilon for exploration"""
     end_e: float = 0.05
     """the ending epsilon for exploration"""
-    exploration_fraction: float = 0.5
+    exploration_fraction: float = 0.001
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
     learning_starts: int = 10000
     """timestep to start learning"""
@@ -77,11 +82,14 @@ class Args:
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
         if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
+            env = gym.make(env_id)
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        if isinstance(env.observation_space, gym.spaces.Box):
+            env = gym.wrappers.TransformObservation(env, lambda obs: obs.astype(np.float32) / 255.0)
+            env.observation_space = gym.spaces.Box(low=0, high=1, shape=env.observation_space.shape, dtype=np.float32)
         env.action_space.seed(seed)
 
         return env
@@ -97,16 +105,33 @@ class QNetwork(nn.Module):
         self.n_atoms = n_atoms
         self.register_buffer("atoms", torch.linspace(v_min, v_max, steps=n_atoms))
         self.n = env.single_action_space.n
-        self.network = nn.Sequential(
-            nn.Linear(np.array(env.single_observation_space.shape).prod(), 120),
+        
+        self.convlstm = ConvLSTM(input_dim=3, hidden_dim=[32, 32, 32], kernel_size=(3, 3), num_layers=3, return_all_layers=False)
+        self.flatten = nn.Flatten()
+        
+        # Calculate the size of feature map after convolution
+        conv_out_size = 32 * 7 * 7  # Feature map size remains unchanged due to padding
+        
+        self.fc = nn.Sequential(
+            nn.Linear(conv_out_size, 120),
             nn.ReLU(),
             nn.Linear(120, 84),
             nn.ReLU(),
-            nn.Linear(84, self.n * n_atoms),
+            nn.Linear(84, self.n * n_atoms)
         )
 
     def get_action(self, x, action=None):
-        logits = self.network(x)
+        # x shape: (B, 7, 7, 3) -> (B, 3, 7, 7)
+        x = x.permute(0, 3, 1, 2)
+
+        # x shape: (B, 3, 7, 7) -> (3, B, 3, 7, 7)
+        x = x.repeat(3, 1, 1, 1, 1)
+        
+        _, last_state = self.convlstm(x)
+        hidden_state, _cell_state = last_state[0]
+        x = self.flatten(hidden_state)
+        logits = self.fc(x)
+        
         # probability mass function for each action
         pmfs = torch.softmax(logits.view(len(x), self.n, self.n_atoms), dim=2)
         q_values = (pmfs * self.atoms).sum(2)
@@ -243,6 +268,7 @@ poetry run pip install "stable_baselines3==2.0.0a1"
                     writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
                     print("SPS:", int(global_step / (time.time() - start_time)))
                     writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+                    writer.add_scalar("charts/epsilon", epsilon, global_step)
 
                 # optimize the model
                 optimizer.zero_grad()
@@ -253,35 +279,35 @@ poetry run pip install "stable_baselines3==2.0.0a1"
             if global_step % args.target_network_frequency == 0:
                 target_network.load_state_dict(q_network.state_dict())
 
-    if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
-        model_data = {
-            "model_weights": q_network.state_dict(),
-            "args": vars(args),
-        }
-        torch.save(model_data, model_path)
-        print(f"model saved to {model_path}")
-        from cleanrl_utils.evals.c51_eval import evaluate
+        if args.save_model and global_step % args.save_model_frequency == 0:
+            model_path = f"runs/{run_name}/{args.exp_name}-{global_step}.cleanrl_model"
+            model_data = {
+                "model_weights": q_network.state_dict(),
+                "args": vars(args),
+            }
+            torch.save(model_data, model_path)
+            print(f"model saved to {model_path}")
+            from cleanrl_utils.evals.c51_eval import evaluate
 
-        episodic_returns = evaluate(
-            model_path,
-            make_env,
-            args.env_id,
-            eval_episodes=10,
-            run_name=f"{run_name}-eval",
-            Model=QNetwork,
-            device=device,
-            epsilon=0.05,
-        )
-        for idx, episodic_return in enumerate(episodic_returns):
-            writer.add_scalar("eval/episodic_return", episodic_return, idx)
+            episodic_returns = evaluate(
+                model_path,
+                make_env,
+                args.env_id,
+                eval_episodes=10,
+                run_name=f"{run_name}-eval",
+                Model=QNetwork,
+                device=device,
+                epsilon=0.0,
+            )
+            for idx, episodic_return in enumerate(episodic_returns):
+                writer.add_scalar("eval/episodic_return", episodic_return, idx)
 
-        if args.upload_model:
-            from cleanrl_utils.huggingface import push_to_hub
+            if args.upload_model:
+                from cleanrl_utils.huggingface import push_to_hub
 
-            repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
-            repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-            push_to_hub(args, episodic_returns, repo_id, "C51", f"runs/{run_name}", f"videos/{run_name}-eval")
+                repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
+                repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
+                push_to_hub(args, episodic_returns, repo_id, "C51", f"runs/{run_name}", f"videos/{run_name}-eval")
 
     envs.close()
     writer.close()
