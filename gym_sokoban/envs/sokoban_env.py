@@ -94,15 +94,15 @@ class SokobanEnv(gym.Env):
 
         moved_box = False
 
-        if action == 0:
-            moved_player = False
+        # if action == 0:
+        #     moved_player = False
 
-        # All push actions are in the range of [0, 3]
-        elif action < 5:
-            moved_player, moved_box = self._push(action)
+        # # All push actions are in the range of [0, 3]
+        # elif action < 5:
+        moved_player, moved_box = self._push(action)
 
-        else:
-            moved_player = self._move(action)
+        # else:
+        #     moved_player = self._move(action)
 
         self._calc_reward()
         
@@ -127,7 +127,7 @@ class SokobanEnv(gym.Env):
         :param action:
         :return: Boolean, indicating a change of the room's state
         """
-        change = CHANGE_COORDINATES[(action - 1) % 4]
+        change = CHANGE_COORDINATES[action]
         new_position = self.player_position + change
         current_position = self.player_position.copy()
 
@@ -168,7 +168,7 @@ class SokobanEnv(gym.Env):
         :param action:
         :return: Boolean, indicating a change of the room's state
         """
-        change = CHANGE_COORDINATES[(action - 1) % 4]
+        change = CHANGE_COORDINATES[action]
         new_position = self.player_position + change
         current_position = self.player_position.copy()
 
@@ -309,15 +309,10 @@ class SokobanEnv(gym.Env):
 
 
 ACTION_LOOKUP = {
-    0: 'no operation',
-    1: 'push up',
-    2: 'push down',
-    3: 'push left',
-    4: 'push right',
-    5: 'move up',
-    6: 'move down',
-    7: 'move left',
-    8: 'move right',
+    0: 'push up',
+    1: 'push down',
+    2: 'push left',
+    3: 'push right',
 }
 
 # Moves are mapped to coordinate changes as follows

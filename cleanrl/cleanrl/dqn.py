@@ -17,7 +17,7 @@ import torch.optim as optim
 import tyro
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
-from models.convlstm import ConvLSTM
+from modules.convlstm import ConvLSTM
 
 
 @dataclass
@@ -142,7 +142,7 @@ poetry run pip install "stable_baselines3==2.0.0a1"
         )
     args = tyro.cli(Args)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
-    run_name = f"DQN_ConvLSTM_01"
+    run_name = f"DQN_ConvLSTM_02_reduce_action_space"
     if args.track:
         import wandb
 
