@@ -1,23 +1,19 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_ataripy
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import random
 import time
 from dataclasses import dataclass
 
 import gymnasium as gym
+import gym_sokoban
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tyro
-from stable_baselines3.common.atari_wrappers import (
-    ClipRewardEnv,
-    EpisodicLifeEnv,
-    FireResetEnv,
-    MaxAndSkipEnv,
-    NoopResetEnv,
-)
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
@@ -76,22 +72,11 @@ class Args:
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
         if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
+            env = gym.make(env_id)
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-
-        env = NoopResetEnv(env, noop_max=30)
-        env = MaxAndSkipEnv(env, skip=4)
-        env = EpisodicLifeEnv(env)
-        if "FIRE" in env.unwrapped.get_action_meanings():
-            env = FireResetEnv(env)
-        env = ClipRewardEnv(env)
-        env = gym.wrappers.ResizeObservation(env, (84, 84))
-        env = gym.wrappers.GrayScaleObservation(env)
-        env = gym.wrappers.FrameStack(env, 4)
-
         env.action_space.seed(seed)
         return env
 
@@ -112,12 +97,13 @@ class SoftQNetwork(nn.Module):
     def __init__(self, envs):
         super().__init__()
         obs_shape = envs.single_observation_space.shape
+        obs_shape = (obs_shape[2], obs_shape[0], obs_shape[1])
         self.conv = nn.Sequential(
-            layer_init(nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4)),
+            layer_init(nn.Conv2d(obs_shape[0], 32, kernel_size=5, stride=1, padding=2)),
             nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
+            layer_init(nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)),
             nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
+            layer_init(nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)),
             nn.Flatten(),
         )
 
@@ -128,6 +114,7 @@ class SoftQNetwork(nn.Module):
         self.fc_q = layer_init(nn.Linear(512, envs.single_action_space.n))
 
     def forward(self, x):
+        x = x.permute(0, 3, 1, 2)
         x = F.relu(self.conv(x / 255.0))
         x = F.relu(self.fc1(x))
         q_vals = self.fc_q(x)
@@ -138,12 +125,13 @@ class Actor(nn.Module):
     def __init__(self, envs):
         super().__init__()
         obs_shape = envs.single_observation_space.shape
+        obs_shape = (obs_shape[2], obs_shape[0], obs_shape[1])
         self.conv = nn.Sequential(
-            layer_init(nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4)),
+            layer_init(nn.Conv2d(obs_shape[0], 32, kernel_size=5, stride=1, padding=2)),
             nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
+            layer_init(nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)),
             nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
+            layer_init(nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)),
             nn.Flatten(),
         )
 
@@ -154,6 +142,7 @@ class Actor(nn.Module):
         self.fc_logits = layer_init(nn.Linear(512, envs.single_action_space.n))
 
     def forward(self, x):
+        x = x.permute(0, 3, 1, 2)
         x = F.relu(self.conv(x))
         x = F.relu(self.fc1(x))
         logits = self.fc_logits(x)
@@ -181,7 +170,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
 """
         )
     args = tyro.cli(Args)
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"SAC_01_default"
     if args.track:
         import wandb
 
