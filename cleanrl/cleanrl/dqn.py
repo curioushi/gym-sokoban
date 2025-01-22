@@ -17,6 +17,7 @@ import torch.optim as optim
 import tyro
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
+from models.convlstm import ConvLSTM
 
 
 @dataclass
@@ -49,21 +50,21 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "CartPole-v1"
     """the id of the environment"""
-    total_timesteps: int = 50000000
+    total_timesteps: int = 10_000_000
     """total timesteps of the experiments"""
-    learning_rate: float = 2.5e-4
+    learning_rate: float = 1e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    buffer_size: int = 10000
+    buffer_size: int = 500000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
     tau: float = 1.0
     """the target network update rate"""
-    target_network_frequency: int = 500
+    target_network_frequency: int = 1000
     """the timesteps it takes to update the target network"""
-    batch_size: int = 128
+    batch_size: int = 32
     """the batch size of sample from the reply memory"""
     start_e: float = 1
     """the starting epsilon for exploration"""
@@ -71,9 +72,9 @@ class Args:
     """the ending epsilon for exploration"""
     exploration_fraction: float = 0.5
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
-    learning_starts: int = 10000
+    learning_starts: int = 50000
     """timestep to start learning"""
-    train_frequency: int = 10
+    train_frequency: int = 4
     """the frequency of training"""
 
 
@@ -99,12 +100,8 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 class QNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
-        self.relu = nn.ReLU()
+        self.convlstm = ConvLSTM(input_dim=3, hidden_dim=[32, 32, 32], kernel_size=(3, 3), num_layers=3, return_all_layers=False)
         self.flatten = nn.Flatten()
-        
-        # Calculate the size of feature map after convolution
         conv_out_size = 32 * 7 * 7  # Feature map size remains unchanged due to padding
         
         self.fc = nn.Sequential(
@@ -118,10 +115,13 @@ class QNetwork(nn.Module):
     def forward(self, x):
         # x shape: (B, 7, 7, 3) -> (B, 3, 7, 7)
         x = x.permute(0, 3, 1, 2)
+
+        # x shape: (B, 3, 7, 7) -> (3, B, 3, 7, 7)
+        x = x.repeat(3, 1, 1, 1, 1)
         
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.flatten(x)
+        _, last_state = self.convlstm(x)
+        hidden_state, _cell_state = last_state[0]
+        x = self.flatten(hidden_state)
         return self.fc(x)
 
 
@@ -142,7 +142,7 @@ poetry run pip install "stable_baselines3==2.0.0a1"
         )
     args = tyro.cli(Args)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"DQN_ConvLSTM_01"
     if args.track:
         import wandb
 
