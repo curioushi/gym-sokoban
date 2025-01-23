@@ -17,8 +17,8 @@ The room generation is random and therefore, will allow to train Deep Neural Net
 # create a new environment
 conda create -n gym-sokoban python=3.9
 
-# install cleanrl core requirements
-pip install -r cleanrl/requirements/requirements.txt
+# install stable-baselines3
+pip install 'stable-baselines3[extra]'
 
 # install gym-sokoban
 pip install -e .
