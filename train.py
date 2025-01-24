@@ -18,7 +18,6 @@ class VideoRecorderCallback(BaseCallback):
         self,
         eval_env: gym.Env,
         render_freq: int,
-        deterministic: bool = False,
     ):
         """
         Records a video of an agent's trajectory traversing ``eval_env`` and logs it to TensorBoard
@@ -26,36 +25,34 @@ class VideoRecorderCallback(BaseCallback):
         :param eval_env: A gym environment from which the trajectory is recorded
         :param render_freq: Render the agent's trajectory every eval_freq call of the callback.
         :param n_eval_episodes: Number of episodes to render
-        :param deterministic: Whether to use deterministic or stochastic policy
         """
         super().__init__()
         eval_env.reset(seed=1234)
         self._eval_env = eval_env
         self._render_freq = render_freq
-        self._deterministic = deterministic
 
     def _on_step(self) -> bool:
         if self.n_calls % self._render_freq == 0:
-            env = deepcopy(self._eval_env)
-            screens = []
-
-            observations = env.render()
-            screens.append(observations.transpose(2, 0, 1))
-            while True:
-                actions, _ = model.predict(
-                    observations,
-                    deterministic=self._deterministic,
+            for deterministic in [True, False]:
+                env = deepcopy(self._eval_env)
+                screens = []
+                observations = env.render()
+                screens.append(observations.transpose(2, 0, 1))
+                while True:
+                    actions, _ = model.predict(
+                        observations,
+                        deterministic=deterministic,
+                    )
+                    new_observation, _, terminated, truncated, _ = env.step(int(actions))
+                    screens.append(new_observation.transpose(2, 0, 1))
+                    if terminated or truncated:
+                        break
+                    observations = new_observation
+                self.logger.record(
+                    "trajectory/video_" + ("deterministic" if deterministic else "stochastic"),
+                    Video(torch.from_numpy(np.asarray([screens])), fps=60),
+                    exclude=("stdout", "log", "json", "csv"),
                 )
-                new_observation, _, terminated, truncated, _ = env.step(int(actions))
-                screens.append(new_observation.transpose(2, 0, 1))
-                if terminated or truncated:
-                    break
-                observations = new_observation
-            self.logger.record(
-                "trajectory/video",
-                Video(torch.from_numpy(np.asarray([screens])), fps=60),
-                exclude=("stdout", "log", "json", "csv"),
-            )
         return True
 
 
@@ -84,7 +81,6 @@ if __name__ == "__main__":
     video_callback = VideoRecorderCallback(
         gym.make("Sokoban-small-v1", observation_mode=args.observation_mode),
         render_freq=100_000,
-        deterministic=True
     )
 
     callbacks = CallbackList([checkpoint_callback, video_callback])
