@@ -1,3 +1,4 @@
+import cv2
 from copy import deepcopy
 import torch
 import numpy as np
@@ -62,6 +63,7 @@ def parse_args():
     parser.add_argument("--policy_name", type=str, default="CnnPolicy")
     parser.add_argument("--total_timesteps", type=int, default=10_000_000)
     parser.add_argument("--observation_mode", type=str, default="rgb_array")
+    parser.add_argument("--checkpoint_path", type=str, default=None)
     return parser.parse_args()
 
 
@@ -69,25 +71,44 @@ if __name__ == "__main__":
     args = parse_args()
 
     env = gym.make("Sokoban-small-v1", observation_mode=args.observation_mode)
+    
+    if args.checkpoint_path is None:
+        checkpoint_callback = CheckpointCallback(
+            save_freq=100_000,
+            save_path="./checkpoints/",
+            name_prefix=args.exp_name,
+            save_replay_buffer=False,
+            save_vecnormalize=False,
+        )
 
-    checkpoint_callback = CheckpointCallback(
-        save_freq=100_000,
-        save_path="./checkpoints/",
-        name_prefix=args.exp_name,
-        save_replay_buffer=False,
-        save_vecnormalize=False,
-    )
+        video_callback = VideoRecorderCallback(
+            gym.make("Sokoban-small-v1", observation_mode=args.observation_mode),
+            render_freq=100_000,
+        )
 
-    video_callback = VideoRecorderCallback(
-        gym.make("Sokoban-small-v1", observation_mode=args.observation_mode),
-        render_freq=100_000,
-    )
+        callbacks = CallbackList([checkpoint_callback, video_callback])
 
-    callbacks = CallbackList([checkpoint_callback, video_callback])
+        tensorboard_log = f"runs/{args.exp_name}"
 
-    model = PPO(
-        args.policy_name, env, verbose=1, tensorboard_log=f"runs/{args.exp_name}"
-    )
+        model = PPO(
+            args.policy_name, env, verbose=1, tensorboard_log=tensorboard_log
+        )
+        model.learn(total_timesteps=args.total_timesteps, callback=callbacks)
 
-    model.learn(total_timesteps=args.total_timesteps, callback=callbacks)
+    else:
+        model = PPO.load(args.checkpoint_path)
+
+        env = gym.make("Sokoban-small-v1", observation_mode=args.observation_mode)
+        observation, info = env.reset()
+        while True:
+            action, _ = model.predict(observation, deterministic=False)
+            observation, reward, terminated, truncated, info = env.step(int(action))
+            vis = cv2.resize(observation, (512, 512))
+            vis = cv2.cvtColor(vis, cv2.COLOR_RGB2BGR)
+            cv2.imshow('frame', vis)
+            cv2.waitKey(60)
+            if terminated or truncated:
+                observation, info = env.reset()
+
+
 
